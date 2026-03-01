@@ -1,0 +1,33 @@
+# Build directories
+build/
+build_addon/
+**/build-*/
+**/CMakeFiles/
+**/CMakeCache.txt
+**/*.vcxproj.user
+**/*.VC.db
+**/*.ilk
+**/*.pdb
+**/*.obj
+**/*.lib
+**/*.exp
+**/*.idb
+**/*.ipdb
+**/*.iobj
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local test outputs
+test_outputs/
+
+# Temporary backups
+*.bak
+*.tmp
+
+# IDE
+.idea/
+.vscode/
