@@ -2,12 +2,17 @@
 #include <sapi.h>
 #include <sapiddk.h>
 
+#include "blackbox/prosody.hpp"
+#include "blackbox/sam_like.hpp"
+#include "blackbox/text.hpp"
+
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cwctype>
+#include <fstream>
 #include <new>
 #include <random>
 #include <string>
@@ -18,9 +23,12 @@ namespace {
 
 const CLSID CLSID_BlackBoxSapi5 =
 { 0x9b5d8344, 0x4d5e, 0x46a2, { 0x80, 0xd5, 0x2d, 0x83, 0xcc, 0x6b, 0xc2, 0x7d } };
+const GUID kSpdfidWaveFormatEx =
+{ 0xC31ADBAE, 0x527F, 0x4FF5, { 0xA2, 0x30, 0xF6, 0x2B, 0xB6, 0x1F, 0xF7, 0x0C } };
 
 constexpr wchar_t kEngineName[] = L"BlackBox V8 SAPI5 Engine";
 constexpr uint32_t kSampleRate = 22050;
+constexpr wchar_t kUserSettingsSubKey[] = L"Software\\BlackBox\\SAPI5\\Settings";
 
 HMODULE g_module = nullptr;
 std::atomic<ULONG> g_objects{0};
@@ -29,11 +37,16 @@ std::atomic<ULONG> g_locks{0};
 enum class IntonationMode { Auto, Flat, Statement, Question, Exclamation };
 enum class TokenType { Phone, PauseShort, PauseLong };
 enum class VoiceFlavor { C64, Clear };
-enum class NumberMode { Cardinal, Digits };
 enum class SymbolLevel { None, Some, Most, All };
 
 struct Token { TokenType type; std::wstring p; };
 struct SentenceChunk { std::wstring text; wchar_t mark; };
+struct UserVoiceSettings {
+    int speedPercent = 50;
+    int pitchPercent = 50;
+    int modulationPercent = 50;
+    int volumePercent = 100;
+};
 
 HRESULT WriteRegString(HKEY root, const wchar_t* subKey, const wchar_t* name, const wchar_t* value) {
     HKEY key = nullptr;
@@ -63,6 +76,7 @@ std::wstring ToLowerPL(const std::wstring& s) { std::wstring o; o.reserve(s.size
 bool IsWhitespace(wchar_t ch) { return ch == L' ' || ch == L'\t' || ch == L'\r' || ch == L'\n'; }
 bool IsAsciiAlphaNum(wchar_t ch) { return (ch >= L'a' && ch <= L'z') || (ch >= L'A' && ch <= L'Z') || (ch >= L'0' && ch <= L'9'); }
 int ClampInt(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+bool IsSpeechAction(SPVACTIONS action) { return action == SPVA_Speak || action == SPVA_Pronounce || action == SPVA_SpellOut; }
 
 void ReplaceAll(std::wstring& s, const std::wstring& from, const std::wstring& to) {
     if (from.empty()) return;
@@ -73,7 +87,7 @@ void ReplaceAll(std::wstring& s, const std::wstring& from, const std::wstring& t
 std::wstring JoinSpeakText(const SPVTEXTFRAG* fragList) {
     std::wstring out;
     for (auto f = fragList; f; f = f->pNext) {
-        if (f->pTextStart && f->ulTextLen > 0 && f->State.eAction != SPVA_Silence) {
+        if (f->pTextStart && f->ulTextLen > 0 && IsSpeechAction(f->State.eAction)) {
             out.append(f->pTextStart, f->ulTextLen);
             out.push_back(L' ');
         } else if (f->State.eAction == SPVA_Silence) {
@@ -83,20 +97,82 @@ std::wstring JoinSpeakText(const SPVTEXTFRAG* fragList) {
     return out;
 }
 
-int RateAdjustToPercent(long rateAdjust) { return ClampInt(50 + static_cast<int>(rateAdjust) * 4, 0, 100); }
-int PitchAdjustToPercent(const SPVTEXTFRAG* fragList) {
+int AdjustToPercent(long adjust) { return ClampInt(50 + static_cast<int>(adjust) * 5, 0, 100); }
+int PercentToSamSpeed(int percent) {
+    const double centered = (static_cast<double>(ClampInt(percent, 0, 100)) - 50.0) / 50.0;
+    const double factor = std::pow(3.0, -centered);
+    return ClampInt(static_cast<int>(std::lround(72.0 * factor)), 24, 180);
+}
+int ScaleSamSpeedByRateAdjust(int baseSamSpeed, long rateAdjust) {
+    const double clamped = std::clamp(static_cast<double>(rateAdjust), -10.0, 10.0);
+    const double factor = std::pow(3.0, -clamped / 10.0);
+    return ClampInt(static_cast<int>(std::lround(static_cast<double>(baseSamSpeed) * factor)), 24, 180);
+}
+int PercentToSamPitch(int percent) {
+    const double centered = (static_cast<double>(ClampInt(percent, 0, 100)) - 50.0) / 50.0;
+    const double factor = std::pow(2.0, -centered);
+    return ClampInt(static_cast<int>(std::lround(64.0 * factor)), 24, 104);
+}
+int AdjustSamPitchByMiddleAdjust(int baseSamPitch, long middleAdj) {
+    return ClampInt(baseSamPitch - static_cast<int>(middleAdj) * 3, 24, 104);
+}
+int PercentToIntonationStrength(int percent) {
+    return ClampInt(20 + static_cast<int>(std::lround(1.8 * ClampInt(percent, 0, 100))), 20, 200);
+}
+int AdjustIntonationStrengthByRange(int baseStrength, long rangeAdj) {
+    return ClampInt(baseStrength + static_cast<int>(rangeAdj) * 8, 20, 200);
+}
+int CombineVolumePercent(int baseVolumePercent, int sapiVolumePercent) {
+    return ClampInt((ClampInt(baseVolumePercent, 0, 100) * ClampInt(sapiVolumePercent, 0, 100)) / 100, 0, 100);
+}
+bool ReadUserDword(const wchar_t* valueName, DWORD* value) {
+    if (!value) {
+        return false;
+    }
+    DWORD type = 0;
+    DWORD size = sizeof(DWORD);
+    const LONG rc = RegGetValueW(HKEY_CURRENT_USER, kUserSettingsSubKey, valueName, RRF_RT_REG_DWORD, &type, value, &size);
+    return rc == ERROR_SUCCESS;
+}
+UserVoiceSettings LoadUserVoiceSettings() {
+    UserVoiceSettings settings;
+    DWORD value = 0;
+    if (ReadUserDword(L"SpeedPercent", &value)) {
+        settings.speedPercent = ClampInt(static_cast<int>(value), 0, 100);
+    }
+    if (ReadUserDword(L"PitchPercent", &value)) {
+        settings.pitchPercent = ClampInt(static_cast<int>(value), 0, 100);
+    }
+    if (ReadUserDword(L"ModulationPercent", &value)) {
+        settings.modulationPercent = ClampInt(static_cast<int>(value), 0, 100);
+    }
+    if (ReadUserDword(L"VolumePercent", &value)) {
+        settings.volumePercent = ClampInt(static_cast<int>(value), 0, 100);
+    }
+    return settings;
+}
+long AveragePitchMiddleAdj(const SPVTEXTFRAG* fragList) {
     long sum = 0, count = 0;
     for (auto f = fragList; f; f = f->pNext) {
-        if ((f->State.eAction == SPVA_Speak || f->State.eAction == SPVA_Pronounce || f->State.eAction == SPVA_SpellOut) && f->pTextStart && f->ulTextLen > 0) {
+        if (IsSpeechAction(f->State.eAction) && f->pTextStart && f->ulTextLen > 0) {
             sum += f->State.PitchAdj.MiddleAdj; ++count;
         }
     }
-    return ClampInt(50 + static_cast<int>((count > 0 ? sum / count : 0)) * 3, 0, 100);
+    return count > 0 ? (sum / count) : 0;
+}
+long AveragePitchRangeAdj(const SPVTEXTFRAG* fragList) {
+    long sum = 0, count = 0;
+    for (auto f = fragList; f; f = f->pNext) {
+        if (IsSpeechAction(f->State.eAction) && f->pTextStart && f->ulTextLen > 0) {
+            sum += f->State.PitchAdj.RangeAdj; ++count;
+        }
+    }
+    return count > 0 ? (sum / count) : 0;
 }
 int EmphasisAdjust(const SPVTEXTFRAG* fragList) {
     long sum = 0, count = 0;
     for (auto f = fragList; f; f = f->pNext) {
-        if ((f->State.eAction == SPVA_Speak || f->State.eAction == SPVA_Pronounce || f->State.eAction == SPVA_SpellOut) && f->pTextStart && f->ulTextLen > 0) {
+        if (IsSpeechAction(f->State.eAction) && f->pTextStart && f->ulTextLen > 0) {
             sum += f->State.EmphAdj; ++count;
         }
     }
@@ -168,7 +244,7 @@ std::wstring DigitsToPolishWords(const std::wstring& digits) {
     return out;
 }
 
-std::wstring ExpandNumbers(const std::wstring& in, NumberMode numberMode) {
+std::wstring ExpandNumbers(const std::wstring& in, blackbox::NumberMode numberMode) {
     std::wstring out;
     size_t i = 0;
     while (i < in.size()) {
@@ -184,7 +260,7 @@ std::wstring ExpandNumbers(const std::wstring& in, NumberMode numberMode) {
                 try {
                     const std::wstring raw = in.substr(start, j - start);
                     out += L' ';
-                    out += (numberMode == NumberMode::Digits) ? DigitsToPolishWords(raw) : IntToPolishWords(std::stoll(raw));
+                    out += (numberMode == blackbox::NumberMode::Digits) ? DigitsToPolishWords(raw) : IntToPolishWords(std::stoll(raw));
                     out += L' ';
                     i = j;
                     continue;
@@ -257,7 +333,7 @@ void AppendNoise(std::vector<float>& out, uint32_t count, float amp, std::mt1993
 
 std::vector<Token> TokenizeToPhonemes(const std::wstring& sentence, SymbolLevel symbolLevel) {
     std::vector<Token> tokens;
-    std::wstring s = NormalizePolishText(sentence);
+    std::wstring s = blackbox::NormalizePolishText(sentence);
     for (size_t i = 0; i < s.size();) {
         wchar_t ch = s[i], n1 = (i + 1 < s.size()) ? s[i + 1] : L'\0', n2 = (i + 2 < s.size()) ? s[i + 2] : L'\0';
         if (IsWhitespace(ch)) { tokens.push_back({TokenType::PauseShort, L""}); ++i; continue; }
@@ -306,7 +382,7 @@ double ContourFactor(double pos, IntonationMode mode, double str) {
 
 IntonationMode ParseIntonationMode(const wchar_t* raw) {
     if (!raw) return IntonationMode::Auto;
-    std::wstring v = ToLowerPL(raw);
+    std::wstring v = blackbox::ToLowerPL(raw);
     if (v == L"flat") return IntonationMode::Flat;
     if (v == L"statement") return IntonationMode::Statement;
     if (v == L"question") return IntonationMode::Question;
@@ -322,214 +398,97 @@ IntonationMode ResolveSentenceMode(IntonationMode configured, wchar_t mark, int 
 }
 VoiceFlavor ParseVoiceFlavor(const wchar_t* raw) {
     if (!raw) return VoiceFlavor::C64;
-    std::wstring v = ToLowerPL(raw);
+    std::wstring v = blackbox::ToLowerPL(raw);
     if (v == L"clear" || v == L"clean" || v == L"hifi") return VoiceFlavor::Clear;
     return VoiceFlavor::C64;
 }
 
-NumberMode ParseNumberMode(const wchar_t* raw) {
-    if (!raw) return NumberMode::Cardinal;
-    std::wstring v = ToLowerPL(raw);
-    if (v == L"digits" || v == L"digit") return NumberMode::Digits;
-    return NumberMode::Cardinal;
+blackbox::NumberMode ParseNumberMode(const wchar_t* raw) {
+    if (!raw) return blackbox::NumberMode::Cardinal;
+    std::wstring v = blackbox::ToLowerPL(raw);
+    if (v == L"digits" || v == L"digit") return blackbox::NumberMode::Digits;
+    return blackbox::NumberMode::Cardinal;
 }
 
 SymbolLevel ParseSymbolLevel(const wchar_t* raw) {
     if (!raw) return SymbolLevel::Most;
-    std::wstring v = ToLowerPL(raw);
+    std::wstring v = blackbox::ToLowerPL(raw);
     if (v == L"none" || v == L"brak") return SymbolLevel::None;
     if (v == L"some" || v == L"czesc" || v == L"część") return SymbolLevel::Some;
     if (v == L"all" || v == L"wszystkie") return SymbolLevel::All;
     return SymbolLevel::Most;
 }
 
+blackbox::SamIntonationMode ToSamIntonationMode(IntonationMode mode) {
+    switch (mode) {
+    case IntonationMode::Flat:
+        return blackbox::SamIntonationMode::Flat;
+    case IntonationMode::Statement:
+        return blackbox::SamIntonationMode::Statement;
+    case IntonationMode::Question:
+        return blackbox::SamIntonationMode::Question;
+    case IntonationMode::Exclamation:
+        return blackbox::SamIntonationMode::Exclamation;
+    case IntonationMode::Auto:
+    default:
+        return blackbox::SamIntonationMode::Auto;
+    }
+}
+
 bool IsVowelPhone(const std::wstring& p) {
     return p == L"a" || p == L"e" || p == L"i" || p == L"o" || p == L"u" || p == L"y" || p == L"ą" || p == L"ę";
 }
 
-std::vector<uint8_t> NativeSynthesize(const std::wstring& text, int ratePercent, int pitchPercent, int volumePercent, IntonationMode configuredMode, int intonationStrength, SymbolLevel symbolLevel, NumberMode numberMode, int emphAdj, VoiceFlavor flavor) {
-    std::wstring expanded = ExpandNumbers(text, numberMode);
-    auto chunks = SplitSentences(expanded);
+std::vector<uint8_t> NativeSynthesize(const std::wstring& text, int samSpeed, int samPitch, int samIntonationStrength, int volumePercent, IntonationMode configuredMode, SymbolLevel symbolLevel, blackbox::NumberMode numberMode, int emphAdj, VoiceFlavor flavor) {
+    (void)symbolLevel;
 
-    double rateMult = 1.0 / (0.35 + (static_cast<double>(ratePercent) / 100.0) * 2.30);
-    double p = std::clamp(static_cast<double>(pitchPercent) / 100.0, 0.0, 1.0);
-    // Keep default pitch in a medium range; apps can still override via pitch/rate.
-    double basePitchHz = 40.0 + 250.0 * std::pow(p, 1.30);
-    double volumeMult = std::clamp(static_cast<double>(volumePercent) / 100.0, 0.0, 2.0);
-    double contourStrength = std::clamp(static_cast<double>(intonationStrength) / 100.0, 0.25, 2.0);
-    const double formantSlew = (flavor == VoiceFlavor::Clear) ? 0.38 : 0.30;
-    const float unvoicedNoiseGain = (flavor == VoiceFlavor::Clear) ? 0.11f : 0.15f;
-    const float voicedNoiseGain = (flavor == VoiceFlavor::Clear) ? 0.05f : 0.07f;
-    const bool quantizeToC64 = (flavor == VoiceFlavor::C64);
-
-    uint32_t seed = 0;
-    for (wchar_t ch : text) seed = (seed * 1315423911u) ^ static_cast<uint32_t>(ch);
-    seed ^= static_cast<uint32_t>(ratePercent * 31 + pitchPercent * 17 + volumePercent * 13 + intonationStrength * 7);
-    std::mt19937 rng(seed);
-
-    std::vector<float> output;
-    output.reserve(text.size() * 2000);
-    std::array<double, 3> curF = {500,1000,2000};
-
-    for (const auto& chunk : chunks) {
-        auto tokens = TokenizeToPhonemes(chunk.text, symbolLevel);
-        if (tokens.empty()) continue;
-
-        size_t speechCount = 0;
-        for (const auto& t : tokens) if (t.type == TokenType::Phone) ++speechCount;
-        speechCount = std::max<size_t>(1, speechCount);
-        IntonationMode sentenceMode = ResolveSentenceMode(configuredMode, chunk.mark, emphAdj);
-
-        size_t spokenIdx = 0;
-        for (size_t ti = 0; ti < tokens.size(); ++ti) {
-            const auto& tok = tokens[ti];
-            if (tok.type == TokenType::PauseShort) { AppendSilence(output, static_cast<uint32_t>(kSampleRate * 0.040 * rateMult)); continue; }
-            if (tok.type == TokenType::PauseLong) { AppendSilence(output, static_cast<uint32_t>(kSampleRate * 0.080 * rateMult)); continue; }
-
-            double pos = speechCount <= 1 ? 0.0 : static_cast<double>(spokenIdx) / static_cast<double>(speechCount - 1);
-            ++spokenIdx;
-            double localPitch = std::max(28.0, basePitchHz * ContourFactor(pos, sentenceMode, contourStrength));
-
-            double dur = 0.10 * rateMult;
-            bool prevConsonant = false, nextConsonant = false;
-            if (ti > 0 && tokens[ti - 1].type == TokenType::Phone && !IsVowelPhone(tokens[ti - 1].p)) prevConsonant = true;
-            if (ti + 1 < tokens.size() && tokens[ti + 1].type == TokenType::Phone && !IsVowelPhone(tokens[ti + 1].p)) nextConsonant = true;
-            const bool inConsonantCluster = (!IsVowelPhone(tok.p) && (prevConsonant || nextConsonant));
-            if (tok.p == L"m" || tok.p == L"n" || tok.p == L"ń" || tok.p == L"l" || tok.p == L"ł" || tok.p == L"r" || tok.p == L"j" || tok.p == L"w") dur = 0.085 * rateMult;
-            if (tok.p == L"p" || tok.p == L"b" || tok.p == L"t" || tok.p == L"d" || tok.p == L"k" || tok.p == L"g" || tok.p == L"c" || tok.p == L"ć" || tok.p == L"cz" || tok.p == L"dz" || tok.p == L"dź" || tok.p == L"dż") dur = 0.06 * rateMult;
-            const bool emphaticPhone = (tok.p == L"sz" || tok.p == L"cz" || tok.p == L"k" || tok.p == L"t" || tok.p == L"ś" || tok.p == L"dź" || tok.p == L"dż" || tok.p == L"ć" || tok.p == L"ł" || tok.p == L"ę" || tok.p == L"ż");
-            if (inConsonantCluster) dur *= 1.28;
-            if (emphaticPhone) dur *= 1.12;
-            if (IsVowelPhone(tok.p) && nextConsonant) dur *= 1.08;
-            const bool nextIsSz = (ti + 1 < tokens.size() && tokens[ti + 1].type == TokenType::Phone && tokens[ti + 1].p == L"sz");
-            const bool nextIsK = (ti + 1 < tokens.size() && tokens[ti + 1].type == TokenType::Phone && tokens[ti + 1].p == L"k");
-            const bool nextIsT = (ti + 1 < tokens.size() && tokens[ti + 1].type == TokenType::Phone && tokens[ti + 1].p == L"t");
-            const bool prevIsR = (ti > 0 && tokens[ti - 1].type == TokenType::Phone && tokens[ti - 1].p == L"r");
-            if (tok.p == L"u" && nextIsSz) dur *= 1.45;
-            if (tok.p == L"r" && (nextIsK || nextIsT)) dur *= 1.35;
-            if ((tok.p == L"k" || tok.p == L"t") && prevIsR) dur *= 1.22;
-
-            if (tok.p == L"r") {
-                // Keep Polish /r/ (alveolar tap/trill) crisp, especially before voiceless stops.
-                int taps = 3;
-                double rF1 = 430.0, rF2 = 1180.0, rF3 = 2350.0;
-                double rGap = 0.006;
-                float rAmp = 1.0f;
-                if (nextIsK || nextIsT) {
-                    taps = 4;
-                    rF2 = 1360.0; rF3 = 2660.0;
-                    rGap = 0.004;
-                    rAmp = 1.12f;
-                }
-                for (int j = 0; j < taps; ++j) {
-                    auto pulse = GenRectPulse(rF1, rF2, rF3, static_cast<int>(kSampleRate / (localPitch * 3.3)));
-                    for (float v : pulse) output.push_back(v * rAmp);
-                    AppendSilence(output, static_cast<uint32_t>(kSampleRate * rGap));
-                }
-                if (nextIsK || nextIsT) {
-                    AppendNoise(output, static_cast<uint32_t>(kSampleRate * 0.003), unvoicedNoiseGain * 0.22f, rng, 0.25f);
-                }
-                continue;
-            }
-
-            auto formants = GetFormants(tok.p);
-            if (formants[0] > 0.0) {
-                int pulseLen = std::max(1, static_cast<int>(kSampleRate / localPitch));
-                int cycles = std::max(1, static_cast<int>((kSampleRate * dur) / pulseLen));
-                for (int c = 0; c < cycles; ++c) {
-                    for (int i = 0; i < 3; ++i) curF[i] += (formants[i] - curF[i]) * formantSlew;
-                    auto pulse = GenRectPulse(curF[0], curF[1], curF[2], pulseLen);
-                    output.insert(output.end(), pulse.begin(), pulse.end());
-                }
-            } else if (tok.p == L"s" || tok.p == L"sz" || tok.p == L"ś" || tok.p == L"f" || tok.p == L"h") {
-                float amp = 0.18f;
-                float sparse = 0.20f;
-                if (tok.p == L"sz") { amp = unvoicedNoiseGain * 1.35f; sparse = 0.36f; }
-                else if (tok.p == L"ś") { amp = unvoicedNoiseGain * 1.18f; sparse = 0.32f; }
-                else if (tok.p == L"h") { amp = unvoicedNoiseGain * 0.85f; sparse = 0.18f; }
-                uint32_t len = static_cast<uint32_t>(kSampleRate * dur * ((tok.p == L"sz" || tok.p == L"ś") ? 1.18 : 1.0));
-                const bool prevIsU = (ti > 0 && tokens[ti - 1].type == TokenType::Phone && tokens[ti - 1].p == L"u");
-                size_t tj = ti + 1;
-                while (tj < tokens.size() && tokens[tj].type == TokenType::PauseShort) ++tj;
-                const bool endLike = (tj >= tokens.size() || tokens[tj].type == TokenType::PauseLong);
-                if (tok.p == L"sz" && (prevIsU || endLike)) {
-                    amp *= 1.12f;
-                    len = static_cast<uint32_t>(len * 1.24);
-                    sparse = std::max(0.38f, sparse);
-                }
-                AppendNoise(output, len, amp, rng, sparse);
-            } else if (tok.p == L"z" || tok.p == L"ż" || tok.p == L"ź" || tok.p == L"w") {
-                auto base = GenRectPulse(380.0, 1400.0, 2300.0, static_cast<int>(kSampleRate / localPitch));
-                int cycles = std::max(1, static_cast<int>((kSampleRate * dur) / std::max<size_t>(1, base.size())));
-                std::uniform_real_distribution<float> u(-1.0f, 1.0f), c(0.0f, 1.0f);
-                float sparse = (tok.p == L"ź") ? 0.38f : 0.28f;
-                float voiceMix = 0.72f;
-                float noiseMix = voicedNoiseGain;
-                if (tok.p == L"ż") { voiceMix = 0.66f; noiseMix = voicedNoiseGain * 1.5f; sparse = 0.36f; }
-                if (tok.p == L"ź") { voiceMix = 0.68f; noiseMix = voicedNoiseGain * 1.35f; }
-                for (int cc = 0; cc < cycles; ++cc) {
-                    for (float v : base) {
-                        float n = u(rng); if (c(rng) > sparse) n = 0.0f;
-                        output.push_back(v * voiceMix + n * noiseMix);
-                    }
-                }
-            } else if (tok.p == L"p" || tok.p == L"b" || tok.p == L"t" || tok.p == L"d" || tok.p == L"k" || tok.p == L"g") {
-                float closure = 0.011f;
-                if (prevIsR && (tok.p == L"t" || tok.p == L"k")) closure = 0.006f;
-                AppendSilence(output, static_cast<uint32_t>(kSampleRate * closure));
-                float amp = 0.24f;
-                uint32_t burstLen = static_cast<uint32_t>(kSampleRate * 0.014);
-                if (tok.p == L"t") { amp = 0.57f; burstLen = static_cast<uint32_t>(kSampleRate * 0.018); }
-                else if (tok.p == L"k") { amp = 0.56f; burstLen = static_cast<uint32_t>(kSampleRate * 0.018); }
-                else if (tok.p == L"p") { amp = 0.36f; burstLen = static_cast<uint32_t>(kSampleRate * 0.014); }
-                if (prevIsR && tok.p == L"t") { amp *= 1.12f; burstLen = static_cast<uint32_t>(burstLen * 1.06f); }
-                if (prevIsR && tok.p == L"k") { amp *= 1.18f; burstLen = static_cast<uint32_t>(burstLen * 1.12f); }
-                AppendNoise(output, burstLen, amp, rng);
-                if (tok.p == L"t" || tok.p == L"k") {
-                    // Extra aspiration burst to make /t/ and /k/ clearer in clusters and final positions.
-                    AppendSilence(output, static_cast<uint32_t>(kSampleRate * 0.002));
-                    float asp = amp * 0.40f;
-                    if (prevIsR) asp *= 1.15f;
-                    uint32_t aspLen = static_cast<uint32_t>(kSampleRate * (prevIsR ? 0.007 : 0.005));
-                    AppendNoise(output, aspLen, asp, rng, 0.28f);
-                }
-            } else if (tok.p == L"cz" || tok.p == L"c" || tok.p == L"ć" || tok.p == L"dz" || tok.p == L"dź" || tok.p == L"dż") {
-                AppendSilence(output, static_cast<uint32_t>(kSampleRate * 0.010));
-                float affAmp = unvoicedNoiseGain;
-                if (tok.p == L"ć" || tok.p == L"dź") affAmp *= 1.45f;
-                else if (tok.p == L"dż" || tok.p == L"cz") affAmp *= 1.35f;
-                AppendNoise(output, static_cast<uint32_t>(kSampleRate * 0.052 * rateMult), affAmp, rng, 0.22f);
-            }
-            AppendSilence(output, static_cast<uint32_t>(kSampleRate * (inConsonantCluster ? 0.0045 : 0.003)));
-        }
-
-        if (chunk.mark == L'?') AppendSilence(output, static_cast<uint32_t>(kSampleRate * 0.060));
-        else if (chunk.mark == L'!') AppendSilence(output, static_cast<uint32_t>(kSampleRate * 0.050));
-        else AppendSilence(output, static_cast<uint32_t>(kSampleRate * 0.070));
+    const std::wstring expanded = blackbox::ExpandNumbers(text, numberMode);
+    blackbox::SamVoiceSettings settings;
+    settings.voice.speed = ClampInt(samSpeed, 24, 180);
+    settings.voice.pitch = ClampInt(samPitch, 24, 104);
+    settings.voice.mouth = 128;
+    settings.voice.throat = 128;
+    settings.volume = ClampInt(volumePercent, 0, 100);
+    settings.stress = ClampInt(5 + (emphAdj / 3), 1, 8);
+    settings.intonationStrength = ClampInt(samIntonationStrength, 20, 200);
+    settings.intonationMode = ToSamIntonationMode(configuredMode);
+    if (configuredMode == IntonationMode::Auto && emphAdj > 6) {
+        settings.intonationMode = blackbox::SamIntonationMode::Exclamation;
     }
-
-    if (output.empty()) return {};
-    AppendSilence(output, static_cast<uint32_t>(kSampleRate * 0.06));
-
-    float peak = 0.0f;
-    for (float v : output) peak = std::max(peak, std::abs(v));
-    if (peak < 1e-6f) peak = 1.0f;
-
-    std::vector<uint8_t> pcm;
-    pcm.reserve(output.size() * sizeof(int16_t));
-    for (float v : output) {
-        float norm = (v / peak) * static_cast<float>(volumeMult);
-        float shaped = quantizeToC64 ? (std::round(norm * 12.0f) / 12.0f) : norm;
-        int sample = static_cast<int>(shaped * 32767.0f);
-        int16_t s = static_cast<int16_t>(std::clamp(sample, -32768, 32767));
-        const uint8_t* samplePtr = reinterpret_cast<const uint8_t*>(&s);
-        pcm.push_back(samplePtr[0]); pcm.push_back(samplePtr[1]);
-    }
-    return pcm;
+    settings.quantizeToC64 = (flavor == VoiceFlavor::C64);
+    return blackbox::SynthesizePolishSamLike(expanded, settings);
 }
 
 bool IsPcm16Mono(const WAVEFORMATEX* fmt) {
     return fmt && fmt->wFormatTag == WAVE_FORMAT_PCM && fmt->nChannels == 1 && fmt->wBitsPerSample == 16;
+}
+
+void MaybeTraceState(long rateAdj, long middleAdj, long rangeAdj, int emphAdj, int ratePercent, int pitchPercent, int rangePercent, int samSpeed, int samPitch, int samIntonationStrength, int finalVolume, const UserVoiceSettings& userSettings) {
+    const wchar_t* enabled = _wgetenv(L"BLACKBOX_SAPI_TRACE");
+    if (!enabled || *enabled == L'\0' || *enabled == L'0') {
+        return;
+    }
+
+    std::wofstream trace(L"C:\\Users\\turek\\Desktop\\blackbox\\test_outputs\\sapi_trace.txt", std::ios::app);
+    if (!trace) {
+        return;
+    }
+    trace << L"rateAdj=" << rateAdj
+          << L" middleAdj=" << middleAdj
+          << L" rangeAdj=" << rangeAdj
+          << L" emphAdj=" << emphAdj
+          << L" ratePercent=" << ratePercent
+          << L" pitchPercent=" << pitchPercent
+          << L" rangePercent=" << rangePercent
+          << L" userSpeed=" << userSettings.speedPercent
+          << L" userPitch=" << userSettings.pitchPercent
+          << L" userModulation=" << userSettings.modulationPercent
+          << L" userVolume=" << userSettings.volumePercent
+          << L" samSpeed=" << samSpeed
+          << L" samPitch=" << samPitch
+          << L" samIntonationStrength=" << samIntonationStrength
+          << L" finalVolume=" << finalVolume
+          << L"\n";
 }
 
 class BlackBoxEngine final : public ISpTTSEngine, public ISpObjectWithToken {
@@ -543,8 +502,8 @@ public:
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
         if (!ppv) return E_POINTER;
         *ppv = nullptr;
-        if (riid == IID_IUnknown || riid == IID_ISpTTSEngine) *ppv = static_cast<ISpTTSEngine*>(this);
-        else if (riid == IID_ISpObjectWithToken) *ppv = static_cast<ISpObjectWithToken*>(this);
+        if (riid == IID_IUnknown || riid == __uuidof(ISpTTSEngine)) *ppv = static_cast<ISpTTSEngine*>(this);
+        else if (riid == __uuidof(ISpObjectWithToken)) *ppv = static_cast<ISpObjectWithToken*>(this);
         else return E_NOINTERFACE;
         AddRef();
         return S_OK;
@@ -564,7 +523,7 @@ public:
         intonationMode_ = IntonationMode::Auto;
         intonationStrength_ = 100;
         symbolLevel_ = SymbolLevel::Most;
-        numberMode_ = NumberMode::Cardinal;
+        numberMode_ = blackbox::NumberMode::Cardinal;
         voiceFlavor_ = VoiceFlavor::C64;
 
         if (token_) {
@@ -595,8 +554,31 @@ public:
 
         long rateAdj = 0; (void)pOutputSite->GetRate(&rateAdj);
         USHORT vol = 100; (void)pOutputSite->GetVolume(&vol);
+        const UserVoiceSettings userSettings = LoadUserVoiceSettings();
+        const long middleAdj = AveragePitchMiddleAdj(pTextFragList);
+        const long rangeAdj = AveragePitchRangeAdj(pTextFragList);
+        const int emphAdj = EmphasisAdjust(pTextFragList);
+        const int ratePercent = AdjustToPercent(rateAdj);
+        const int pitchPercent = AdjustToPercent(middleAdj);
+        const int rangePercent = AdjustToPercent(rangeAdj);
+        const int samSpeed = ScaleSamSpeedByRateAdjust(PercentToSamSpeed(userSettings.speedPercent), rateAdj);
+        const int samPitch = AdjustSamPitchByMiddleAdjust(PercentToSamPitch(userSettings.pitchPercent), middleAdj);
+        const int samIntonationStrength = AdjustIntonationStrengthByRange(PercentToIntonationStrength(userSettings.modulationPercent), rangeAdj);
+        const int finalVolume = CombineVolumePercent(userSettings.volumePercent, static_cast<int>(vol));
+        MaybeTraceState(rateAdj, middleAdj, rangeAdj, emphAdj, ratePercent, pitchPercent, rangePercent, samSpeed, samPitch, samIntonationStrength, finalVolume, userSettings);
 
-        auto pcm = NativeSynthesize(text, RateAdjustToPercent(rateAdj), PitchAdjustToPercent(pTextFragList), ClampInt(static_cast<int>(vol), 0, 100), intonationMode_, intonationStrength_, symbolLevel_, numberMode_, EmphasisAdjust(pTextFragList), voiceFlavor_);
+        auto pcm = NativeSynthesize(
+            text,
+            samSpeed,
+            samPitch,
+            samIntonationStrength,
+            finalVolume,
+            intonationMode_,
+            symbolLevel_,
+            numberMode_,
+            emphAdj,
+            voiceFlavor_
+        );
         if (pcm.empty()) return S_OK;
 
         (void)pWaveFormatEx;
@@ -609,12 +591,12 @@ public:
         *ppCoMemOutputWaveFormatEx = nullptr;
         auto* fmt = static_cast<WAVEFORMATEX*>(CoTaskMemAlloc(sizeof(WAVEFORMATEX)));
         if (!fmt) return E_OUTOFMEMORY;
-        if (pTargetFmtId && *pTargetFmtId == SPDFID_WaveFormatEx && IsPcm16Mono(pTargetWaveFormatEx)) *fmt = *pTargetWaveFormatEx;
+        if (pTargetFmtId && *pTargetFmtId == kSpdfidWaveFormatEx && IsPcm16Mono(pTargetWaveFormatEx)) *fmt = *pTargetWaveFormatEx;
         else {
             fmt->wFormatTag = WAVE_FORMAT_PCM; fmt->nChannels = 1; fmt->nSamplesPerSec = kSampleRate; fmt->wBitsPerSample = 16;
             fmt->nBlockAlign = static_cast<WORD>((fmt->nChannels * fmt->wBitsPerSample) / 8); fmt->nAvgBytesPerSec = fmt->nSamplesPerSec * fmt->nBlockAlign; fmt->cbSize = 0;
         }
-        *pOutputFormatId = SPDFID_WaveFormatEx;
+        *pOutputFormatId = kSpdfidWaveFormatEx;
         *ppCoMemOutputWaveFormatEx = fmt;
         return S_OK;
     }
@@ -625,7 +607,7 @@ private:
     IntonationMode intonationMode_ = IntonationMode::Auto;
     int intonationStrength_ = 100;
     SymbolLevel symbolLevel_ = SymbolLevel::Most;
-    NumberMode numberMode_ = NumberMode::Cardinal;
+    blackbox::NumberMode numberMode_ = blackbox::NumberMode::Cardinal;
     VoiceFlavor voiceFlavor_ = VoiceFlavor::C64;
 };
 class ClassFactory final : public IClassFactory {

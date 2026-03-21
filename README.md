@@ -2,7 +2,7 @@
 
 Polski syntezator mowy inspirowany stylem **BlackBox V8 (C64)**, rozwijany w dwóch wariantach:
 
-- dodatek do **NVDA** (`.nvda-addon`)
+- niezależny dodatek do **NVDA** (`.nvda-addon`, bez wymogu instalacji SAPI5)
 - głos **SAPI5** dla Windows 10/11 x64 (z komponentem x86/x64)
 
 ## Spis treści
@@ -18,13 +18,13 @@ Polski syntezator mowy inspirowany stylem **BlackBox V8 (C64)**, rozwijany w dw�
 
 ## Aktualne wydania
 
-- NVDA addon: `1.0.14`
-- SAPI5 installer: `0.5.1`
+- NVDA addon: `1.2.0`
+- SAPI5 installer: `0.5.10`
 
 Gotowe artefakty buildów:
 
 - `dist/blackbox_v8.nvda-addon`
-- `dist/installer/BlackBoxSapi5-0.5.1-dual.exe`
+- `dist/installer/BlackBoxSapi5-0.5.10-dual.exe`
 
 ## Szybki start
 
@@ -32,11 +32,14 @@ Gotowe artefakty buildów:
 
 1. Otwórz `dist/blackbox_v8.nvda-addon`.
 2. Potwierdź instalację dodatku w NVDA.
-3. Wybierz syntezator BlackBox V8 w ustawieniach NVDA.
+3. Zrestartuj NVDA.
+4. Wybierz syntezator `BlackBox V8` w ustawieniach NVDA.
+
+Dodatek NVDA zawiera własny natywny backend `x86/x64` i działa niezależnie od rejestracji głosu SAPI5 w systemie.
 
 ### Instalacja SAPI5
 
-1. Uruchom `dist/installer/BlackBoxSapi5-0.5.1-dual.exe` jako administrator.
+1. Uruchom `dist/installer/BlackBoxSapi5-0.5.10-dual.exe` jako administrator.
 2. Po instalacji głos pojawia się jako `BlackBox V8`.
 3. Głos jest rejestrowany dla aplikacji SAPI5 x64 i x86.
 
@@ -68,6 +71,14 @@ python package_addon.py
 Wynik:
 
 - `dist/blackbox_v8.nvda-addon`
+- `build_addon/synthDrivers/bin/x86/blackbox_nvda_native.dll`
+- `build_addon/synthDrivers/bin/x64/blackbox_nvda_native.dll`
+
+Skrypt automatycznie:
+
+- buduje natywny backend NVDA w `cpp_core/build-nvda-x86` oraz `cpp_core/build-nvda-x64`,
+- pakuje obie DLL do addonu,
+- nie wymaga zainstalowanego SAPI5 do działania dodatku.
 
 ### 2) Build silnika SAPI5 (x64 + x86)
 
@@ -92,7 +103,7 @@ iscc installer/blackbox_sapi5.iss
 
 Wynik:
 
-- `dist/installer/BlackBoxSapi5-0.5.1-dual.exe`
+- `dist/installer/BlackBoxSapi5-0.5.10-dual.exe`
 
 ### 4) Build one-shot (SAPI5 + instalator)
 
@@ -139,15 +150,15 @@ Skrypt:
 
 - utworzy repozytorium (jeśli nie istnieje),
 - wypchnie gałąź `main`,
-- utworzy release `nvda-v1.0.14` z assetem `.nvda-addon`,
-- utworzy release `sapi5-v0.5.1` z instalatorem `.exe`.
+- utworzy release `nvda-v1.2.0` z assetem `.nvda-addon`,
+- utworzy release `sapi5-v0.5.10` z instalatorem `.exe`.
 
 Ręcznie (alternatywa):
 
 ```powershell
 git push -u origin main
-& 'C:\Program Files\GitHub CLI\gh.exe' release create nvda-v1.0.14 dist/blackbox_v8.nvda-addon --repo turekcom/blackboxv8 --title "NVDA Addon 1.0.14" --notes "Wydanie dodatku NVDA BlackBox V8 (1.0.14)."
-& 'C:\Program Files\GitHub CLI\gh.exe' release create sapi5-v0.5.1 dist/installer/BlackBoxSapi5-0.5.1-dual.exe --repo turekcom/blackboxv8 --title "SAPI5 0.5.1" --notes "Wydanie instalatora SAPI5 BlackBox V8 (0.5.1, dual x64/x86)."
+& 'C:\Program Files\GitHub CLI\gh.exe' release create nvda-v1.2.0 dist/blackbox_v8.nvda-addon --repo turekcom/blackboxv8 --title "NVDA Addon 1.2.0" --notes "Niezależny dodatek NVDA BlackBox V8 (1.2.0) z własnym natywnym backendem x86/x64."
+& 'C:\Program Files\GitHub CLI\gh.exe' release create sapi5-v0.5.10 dist/installer/BlackBoxSapi5-0.5.10-dual.exe --repo turekcom/blackboxv8 --title "SAPI5 0.5.10" --notes "Wydanie instalatora SAPI5 BlackBox V8 (0.5.10, dual x64/x86)."
 ```
 
 ## Struktura repo

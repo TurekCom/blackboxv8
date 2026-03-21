@@ -1,0 +1,5 @@
+<Project>
+  <PropertyGroup Condition="'$(Platform)'=='Win32' and '$(PlatformTarget)'==''">
+    <PlatformTarget>x86</PlatformTarget>
+  </PropertyGroup>
+</Project>

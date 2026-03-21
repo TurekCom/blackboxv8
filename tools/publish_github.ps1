@@ -32,16 +32,16 @@ if (-not $hasOrigin) {
     git push -u origin main
 }
 
-gh release create "nvda-v1.0.14" `
+gh release create "nvda-v1.2.0" `
     "dist/blackbox_v8.nvda-addon" `
     --repo $repoFull `
-    --title "NVDA Addon 1.0.14" `
-    --notes "Wydanie dodatku NVDA BlackBox V8 (1.0.14)."
+    --title "NVDA Addon 1.2.0" `
+    --notes "Niezależny dodatek NVDA BlackBox V8 (1.2.0) z własnym natywnym backendem x86/x64."
 
-gh release create "sapi5-v0.5.1" `
-    "dist/installer/BlackBoxSapi5-0.5.1-dual.exe" `
+gh release create "sapi5-v0.5.10" `
+    "dist/installer/BlackBoxSapi5-0.5.10-dual.exe" `
     --repo $repoFull `
-    --title "SAPI5 0.5.1" `
-    --notes "Wydanie instalatora SAPI5 BlackBox V8 (0.5.1, dual x64/x86)."
+    --title "SAPI5 0.5.10" `
+    --notes "Wydanie instalatora SAPI5 BlackBox V8 (0.5.10, dual x64/x86)."
 
 Write-Host "Publikacja zakonczona: https://github.com/$repoFull"
