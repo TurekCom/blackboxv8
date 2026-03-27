@@ -9,7 +9,25 @@ if(MSVC)
 endif()
 
 add_subdirectory(..\\cpp_core ${CMAKE_CURRENT_BINARY_DIR}/cpp_core_build)
-set(SPEECHSDK51_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../tools/SpeechSDK51_admin/program files/Microsoft Speech SDK 5.1")
+
+set(SPEECHSDK51_CANDIDATES
+  "${CMAKE_CURRENT_SOURCE_DIR}/../tools/SpeechSDK51_admin/program files/Microsoft Speech SDK 5.1"
+  "$ENV{SPEECHSDK51_ROOT}"
+  "C:/Program Files/Microsoft Speech SDK 5.1"
+  "C:/Program Files (x86)/Microsoft Speech SDK 5.1"
+)
+
+set(SPEECHSDK51_ROOT "")
+foreach(candidate IN LISTS SPEECHSDK51_CANDIDATES)
+  if(candidate AND EXISTS "${candidate}/Include/sapi.h")
+    set(SPEECHSDK51_ROOT "${candidate}")
+    break()
+  endif()
+endforeach()
+
+if(NOT SPEECHSDK51_ROOT)
+  message(FATAL_ERROR "Nie znaleziono Microsoft Speech SDK 5.1. Ustaw SPEECHSDK51_ROOT albo rozpakuj SDK do tools/SpeechSDK51_admin.")
+endif()
 
 add_library(BlackBoxSapi5 SHARED
   engine/blackbox_sapi5.cpp

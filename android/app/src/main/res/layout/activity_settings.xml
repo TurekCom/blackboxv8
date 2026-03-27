@@ -1,0 +1,240 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/blackbox_black"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:id="@+id/headerText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/settings_header"
+            android:textColor="@color/blackbox_yellow"
+            android:textSize="28sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/subtitleText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/settings_subtitle"
+            android:textColor="@color/blackbox_yellow_dim"
+            android:textSize="16sp" />
+
+        <TextView
+            android:id="@+id/rateLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:labelFor="@id/rateSeek"
+            android:text="@string/rate_label"
+            android:textColor="@color/blackbox_yellow"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <SeekBar
+            android:id="@+id/rateSeek"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="100"
+            android:progressTint="@color/blackbox_yellow"
+            android:thumbTint="@color/blackbox_yellow" />
+
+        <TextView
+            android:id="@+id/rateValue"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/blackbox_yellow_dim"
+            android:textSize="16sp" />
+
+        <TextView
+            android:id="@+id/pitchLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:labelFor="@id/pitchSeek"
+            android:text="@string/pitch_label"
+            android:textColor="@color/blackbox_yellow"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <SeekBar
+            android:id="@+id/pitchSeek"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="100"
+            android:progressTint="@color/blackbox_yellow"
+            android:thumbTint="@color/blackbox_yellow" />
+
+        <TextView
+            android:id="@+id/pitchValue"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/blackbox_yellow_dim"
+            android:textSize="16sp" />
+
+        <TextView
+            android:id="@+id/volumeLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:labelFor="@id/volumeSeek"
+            android:text="@string/volume_label"
+            android:textColor="@color/blackbox_yellow"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <SeekBar
+            android:id="@+id/volumeSeek"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="100"
+            android:progressTint="@color/blackbox_yellow"
+            android:thumbTint="@color/blackbox_yellow" />
+
+        <TextView
+            android:id="@+id/volumeValue"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/blackbox_yellow_dim"
+            android:textSize="16sp" />
+
+        <TextView
+            android:id="@+id/modulationLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:labelFor="@id/modulationSeek"
+            android:text="@string/modulation_label"
+            android:textColor="@color/blackbox_yellow"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <SeekBar
+            android:id="@+id/modulationSeek"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="100"
+            android:progressTint="@color/blackbox_yellow"
+            android:thumbTint="@color/blackbox_yellow" />
+
+        <TextView
+            android:id="@+id/modulationValue"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/blackbox_yellow_dim"
+            android:textSize="16sp" />
+
+        <CheckBox
+            android:id="@+id/speakEmojiCheck"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:buttonTint="@color/blackbox_yellow"
+            android:checked="true"
+            android:text="@string/speak_emoji_label"
+            android:textColor="@color/blackbox_yellow"
+            android:textSize="18sp" />
+
+        <TextView
+            android:id="@+id/speakEmojiHelp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/speak_emoji_help"
+            android:textColor="@color/blackbox_yellow_dim"
+            android:textSize="16sp" />
+
+        <TextView
+            android:id="@+id/dictionaryLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
+            android:text="@string/dictionary_label"
+            android:textColor="@color/blackbox_yellow"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/dictionaryHelp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/dictionary_help"
+            android:textColor="@color/blackbox_yellow_dim"
+            android:textSize="16sp" />
+
+        <Button
+            android:id="@+id/importDictionaryButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:backgroundTint="@color/blackbox_gray"
+            android:text="@string/dictionary_button"
+            android:textColor="@color/blackbox_yellow"
+            android:textSize="18sp" />
+
+        <TextView
+            android:id="@+id/dictionaryStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:textColor="@color/blackbox_yellow_dim"
+            android:textSize="16sp" />
+
+        <TextView
+            android:id="@+id/previewLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
+            android:text="@string/preview_label"
+            android:textColor="@color/blackbox_yellow"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <EditText
+            android:id="@+id/previewEdit"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:autofillHints=""
+            android:backgroundTint="@color/blackbox_yellow"
+            android:hint="@string/preview_hint"
+            android:importantForAutofill="no"
+            android:inputType="textMultiLine|textCapSentences"
+            android:minLines="3"
+            android:padding="12dp"
+            android:text="@string/sample_text"
+            android:textColor="@color/blackbox_yellow"
+            android:textColorHint="@color/blackbox_yellow_dim" />
+
+        <Button
+            android:id="@+id/previewSpeakButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:backgroundTint="@color/blackbox_gray"
+            android:text="@string/preview_button"
+            android:textColor="@color/blackbox_yellow"
+            android:textSize="18sp" />
+
+        <Button
+            android:id="@+id/previewStopButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:backgroundTint="@color/blackbox_gray"
+            android:text="@string/preview_stop_button"
+            android:textColor="@color/blackbox_yellow"
+            android:textSize="18sp" />
+
+    </LinearLayout>
+</ScrollView>

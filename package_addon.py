@@ -2,11 +2,13 @@ import os
 import shutil
 import subprocess
 import zipfile
+from pathlib import Path
 
 ADDON_NAME = "blackbox_v8"
 BUILD_DIR = "build_addon"
 DIST_DIR = "dist"
 CPP_CORE_DIR = "cpp_core"
+EMOJI_TSV = Path("android") / "app" / "src" / "main" / "assets" / "emoji" / "emoji_pl_cldr.tsv"
 NATIVE_BUILDS = {
     "x86": {"generator_arch": "Win32", "build_dir": os.path.join(CPP_CORE_DIR, "build-nvda-x86")},
     "x64": {"generator_arch": "x64", "build_dir": os.path.join(CPP_CORE_DIR, "build-nvda-x64")},
@@ -36,9 +38,11 @@ def prepare_structure():
     os.makedirs(os.path.join(BUILD_DIR, "synthDrivers"))
     os.makedirs(os.path.join(BUILD_DIR, "synthDrivers", "bin", "x86"))
     os.makedirs(os.path.join(BUILD_DIR, "synthDrivers", "bin", "x64"))
+    os.makedirs(os.path.join(BUILD_DIR, "synthDrivers", "data", "emoji"))
 
     shutil.copy("blackbox_v8_driver.py", os.path.join(BUILD_DIR, "synthDrivers", "blackbox_v8.py"))
     shutil.copy("manifest.ini", BUILD_DIR)
+    shutil.copy(EMOJI_TSV, os.path.join(BUILD_DIR, "synthDrivers", "data", "emoji", "emoji_pl_cldr.tsv"))
 
 def copy_native_backend(artifacts):
     for arch, dll_path in artifacts.items():

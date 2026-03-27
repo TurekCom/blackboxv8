@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="blackbox_black">#000000</color>
+    <color name="blackbox_yellow">#FFD400</color>
+    <color name="blackbox_yellow_dim">#FFEA80</color>
+    <color name="blackbox_gray">#1A1A1A</color>
+</resources>

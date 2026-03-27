@@ -1,5 +1,5 @@
 ﻿#define AppName "BlackBox V8 SAPI5"
-#define AppVersion "0.5.10"
+#define AppVersion "0.5.13"
 #define EngineDllName64 "BlackBoxSapi5.dll"
 #define EngineDllName32 "BlackBoxSapi5.dll"
 #define ConfigExeName "BlackBoxSapi5Config.exe"
@@ -30,6 +30,8 @@ Name: "polish"; MessagesFile: "compiler:Languages\Polish.isl"
 Source: "..\sapi5\build-x64\Release\{#EngineDllName64}"; DestDir: "{app}\x64"; Flags: ignoreversion
 Source: "..\sapi5\build-x86\Release\{#EngineDllName32}"; DestDir: "{app}\x86"; Flags: ignoreversion
 Source: "..\sapi5\build-x64\Release\{#ConfigExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\android\app\src\main\assets\emoji\emoji_pl_cldr.tsv"; DestDir: "{app}\x64"; Flags: ignoreversion
+Source: "..\android\app\src\main\assets\emoji\emoji_pl_cldr.tsv"; DestDir: "{app}\x86"; Flags: ignoreversion
 
 [InstallDelete]
 Type: filesandordirs; Name: "{app}\runtime"

@@ -1,9 +1,10 @@
 # BlackBox V8
 
-Polski syntezator mowy inspirowany stylem **BlackBox V8 (C64)**, rozwijany w dwóch wariantach:
+Polski syntezator mowy inspirowany stylem **BlackBox V8 (C64)**, rozwijany w trzech wariantach:
 
 - niezależny dodatek do **NVDA** (`.nvda-addon`, bez wymogu instalacji SAPI5)
 - głos **SAPI5** dla Windows 10/11 x64 (z komponentem x86/x64)
+- systemowy silnik **Android TTS** (`.apk`) do wyboru w ustawieniach zamiany tekstu na mowę
 
 ## Spis treści
 
@@ -18,13 +19,15 @@ Polski syntezator mowy inspirowany stylem **BlackBox V8 (C64)**, rozwijany w dw�
 
 ## Aktualne wydania
 
-- NVDA addon: `1.2.0`
-- SAPI5 installer: `0.5.10`
+- NVDA addon: `1.3.0`
+- SAPI5 installer: `0.5.13`
+- Android APK: `0.1.2`
 
 Gotowe artefakty buildów:
 
 - `dist/blackbox_v8.nvda-addon`
-- `dist/installer/BlackBoxSapi5-0.5.10-dual.exe`
+- `dist/installer/BlackBoxSapi5-0.5.13-dual.exe`
+- `dist/android/BlackBoxAndroid-0.1.2-release.apk`
 
 ## Szybki start
 
@@ -36,12 +39,19 @@ Gotowe artefakty buildów:
 4. Wybierz syntezator `BlackBox V8` w ustawieniach NVDA.
 
 Dodatek NVDA zawiera własny natywny backend `x86/x64` i działa niezależnie od rejestracji głosu SAPI5 w systemie.
+W ustawieniach głosu NVDA ma też osobny przełącznik odczytu emotikon oraz emoji.
 
 ### Instalacja SAPI5
 
-1. Uruchom `dist/installer/BlackBoxSapi5-0.5.10-dual.exe` jako administrator.
+1. Uruchom `dist/installer/BlackBoxSapi5-0.5.13-dual.exe` jako administrator.
 2. Po instalacji głos pojawia się jako `BlackBox V8`.
 3. Głos jest rejestrowany dla aplikacji SAPI5 x64 i x86.
+
+### Instalacja Android TTS
+
+1. Zainstaluj `dist/android/BlackBoxAndroid-0.1.2-release.apk`.
+2. Otwórz aplikację `BlackBox V8`.
+3. W ustawieniach Androida wybierz `BlackBox V8` jako silnik zamiany tekstu na mowę.
 
 ## Wymagania
 
@@ -73,6 +83,7 @@ Wynik:
 - `dist/blackbox_v8.nvda-addon`
 - `build_addon/synthDrivers/bin/x86/blackbox_nvda_native.dll`
 - `build_addon/synthDrivers/bin/x64/blackbox_nvda_native.dll`
+- `build_addon/synthDrivers/data/emoji/emoji_pl_cldr.tsv`
 
 Skrypt automatycznie:
 
@@ -103,9 +114,21 @@ iscc installer/blackbox_sapi5.iss
 
 Wynik:
 
-- `dist/installer/BlackBoxSapi5-0.5.10-dual.exe`
+- `dist/installer/BlackBoxSapi5-0.5.13-dual.exe`
 
-### 4) Build one-shot (SAPI5 + instalator)
+### 4) Build Android APK
+
+```powershell
+cd android
+.\gradlew.bat test assembleRelease
+cd ..
+```
+
+Wynik:
+
+- `dist/android/BlackBoxAndroid-0.1.2-release.apk`
+
+### 5) Build one-shot (SAPI5 + instalator)
 
 Skrypt pomocniczy:
 
@@ -150,15 +173,17 @@ Skrypt:
 
 - utworzy repozytorium (jeśli nie istnieje),
 - wypchnie gałąź `main`,
-- utworzy release `nvda-v1.2.0` z assetem `.nvda-addon`,
-- utworzy release `sapi5-v0.5.10` z instalatorem `.exe`.
+- utworzy release `nvda-v1.3.0` z assetem `.nvda-addon`,
+- utworzy release `sapi5-v0.5.13` z instalatorem `.exe`,
+- utworzy release `android-v0.1.2` z APK Androida.
 
 Ręcznie (alternatywa):
 
 ```powershell
 git push -u origin main
-& 'C:\Program Files\GitHub CLI\gh.exe' release create nvda-v1.2.0 dist/blackbox_v8.nvda-addon --repo turekcom/blackboxv8 --title "NVDA Addon 1.2.0" --notes "Niezależny dodatek NVDA BlackBox V8 (1.2.0) z własnym natywnym backendem x86/x64."
-& 'C:\Program Files\GitHub CLI\gh.exe' release create sapi5-v0.5.10 dist/installer/BlackBoxSapi5-0.5.10-dual.exe --repo turekcom/blackboxv8 --title "SAPI5 0.5.10" --notes "Wydanie instalatora SAPI5 BlackBox V8 (0.5.10, dual x64/x86)."
+& 'C:\Program Files\GitHub CLI\gh.exe' release create nvda-v1.3.0 dist/blackbox_v8.nvda-addon --repo turekcom/blackboxv8 --title "NVDA Addon 1.3.0" --notes "Niezależny dodatek NVDA BlackBox V8 (1.3.0) z własnym natywnym backendem x86/x64 oraz pełnym odczytem emoji z CLDR."
+& 'C:\Program Files\GitHub CLI\gh.exe' release create sapi5-v0.5.13 dist/installer/BlackBoxSapi5-0.5.13-dual.exe --repo turekcom/blackboxv8 --title "SAPI5 0.5.13" --notes "Wydanie instalatora SAPI5 BlackBox V8 (0.5.13, dual x64/x86) z przełącznikiem odczytu emoji i emotikon."
+& 'C:\Program Files\GitHub CLI\gh.exe' release create android-v0.1.2 dist/android/BlackBoxAndroid-0.1.2-release.apk --repo turekcom/blackboxv8 --title "Android 0.1.2" --notes "Silnik BlackBox V8 TTS dla Androida (0.1.2) z pełnym odczytem emoji na podstawie polskich danych CLDR."
 ```
 
 ## Struktura repo

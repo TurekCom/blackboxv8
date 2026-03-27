@@ -1,5 +1,5 @@
 #define AppName "BlackBox V8 SAPI5"
-#define AppVersion "0.5.10"
+#define AppVersion "0.5.13"
 #define EngineDllName64 "BlackBoxSapi5.dll"
 #define ConfigExeName "BlackBoxSapi5Config.exe"
 #define VoiceToken "BlackBoxV8.Sapi5"
@@ -28,6 +28,7 @@ Name: "polish"; MessagesFile: "compiler:Languages\Polish.isl"
 [Files]
 Source: "..\sapi5\build-x64\Release\{#EngineDllName64}"; DestDir: "{app}\x64"; Flags: ignoreversion
 Source: "..\sapi5\build-x64\Release\{#ConfigExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\android\app\src\main\assets\emoji\emoji_pl_cldr.tsv"; DestDir: "{app}\x64"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\Ustawienia BlackBox V8"; Filename: "{app}\{#ConfigExeName}"

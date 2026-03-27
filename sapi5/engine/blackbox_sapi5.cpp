@@ -15,6 +15,7 @@
 #include <fstream>
 #include <new>
 #include <random>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -29,6 +30,7 @@ const GUID kSpdfidWaveFormatEx =
 constexpr wchar_t kEngineName[] = L"BlackBox V8 SAPI5 Engine";
 constexpr uint32_t kSampleRate = 22050;
 constexpr wchar_t kUserSettingsSubKey[] = L"Software\\BlackBox\\SAPI5\\Settings";
+constexpr wchar_t kEmojiDataFileName[] = L"emoji_pl_cldr.tsv";
 
 HMODULE g_module = nullptr;
 std::atomic<ULONG> g_objects{0};
@@ -46,6 +48,7 @@ struct UserVoiceSettings {
     int pitchPercent = 50;
     int modulationPercent = 50;
     int volumePercent = 100;
+    bool speakEmoji = true;
 };
 
 HRESULT WriteRegString(HKEY root, const wchar_t* subKey, const wchar_t* name, const wchar_t* value) {
@@ -78,17 +81,310 @@ bool IsAsciiAlphaNum(wchar_t ch) { return (ch >= L'a' && ch <= L'z') || (ch >= L
 int ClampInt(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 bool IsSpeechAction(SPVACTIONS action) { return action == SPVA_Speak || action == SPVA_Pronounce || action == SPVA_SpellOut; }
 
+std::wstring SpellOutNameForChar(wchar_t ch) {
+    switch (LowerPL(ch)) {
+    case L'a': return L"a";
+    case L'ą': return L"a z ogonkiem";
+    case L'b': return L"be";
+    case L'c': return L"ce";
+    case L'ć': return L"cie z kreską";
+    case L'd': return L"de";
+    case L'e': return L"e";
+    case L'ę': return L"e z ogonkiem";
+    case L'f': return L"ef";
+    case L'g': return L"gie";
+    case L'h': return L"ha";
+    case L'i': return L"i";
+    case L'j': return L"jot";
+    case L'k': return L"ka";
+    case L'l': return L"el";
+    case L'ł': return L"eł przekreślone";
+    case L'm': return L"em";
+    case L'n': return L"en";
+    case L'ń': return L"eń z kreską";
+    case L'o': return L"o";
+    case L'ó': return L"u z kreską";
+    case L'p': return L"pe";
+    case L'q': return L"ku";
+    case L'r': return L"er";
+    case L's': return L"es";
+    case L'ś': return L"ś z kreską";
+    case L't': return L"te";
+    case L'u': return L"u";
+    case L'v': return L"fał";
+    case L'w': return L"wu";
+    case L'x': return L"iks";
+    case L'y': return L"igrek";
+    case L'z': return L"zet";
+    case L'ź': return L"zie z kreską";
+    case L'ż': return L"zet z kropką";
+    case L'0': return L"zero";
+    case L'1': return L"jeden";
+    case L'2': return L"dwa";
+    case L'3': return L"trzy";
+    case L'4': return L"cztery";
+    case L'5': return L"pięć";
+    case L'6': return L"sześć";
+    case L'7': return L"siedem";
+    case L'8': return L"osiem";
+    case L'9': return L"dziewięć";
+    case L' ': return L"spacja";
+    case L'\t': return L"tabulator";
+    case L'\r':
+    case L'\n': return L"enter";
+    case L'.': return L"kropka";
+    case L',': return L"przecinek";
+    case L':': return L"dwukropek";
+    case L';': return L"średnik";
+    case L'!': return L"wykrzyknik";
+    case L'?': return L"znak zapytania";
+    case L'@': return L"małpa";
+    case L'#': return L"kratka";
+    case L'$': return L"dolar";
+    case L'%': return L"procent";
+    case L'^': return L"daszek";
+    case L'&': return L"ampersand";
+    case L'*': return L"gwiazdka";
+    case L'(': return L"nawias otwierający";
+    case L')': return L"nawias zamykający";
+    case L'[': return L"lewy nawias kwadratowy";
+    case L']': return L"prawy nawias kwadratowy";
+    case L'{': return L"lewa klamra";
+    case L'}': return L"prawa klamra";
+    case L'<': return L"mniejsze niż";
+    case L'>': return L"większe niż";
+    case L'/': return L"ukośnik";
+    case L'\\': return L"ukośnik wsteczny";
+    case L'|': return L"pionowa kreska";
+    case L'-': return L"minus";
+    case L'_': return L"podkreślnik";
+    case L'=': return L"równa się";
+    case L'+': return L"plus";
+    case L'"': return L"cudzysłów";
+    case L'\'': return L"apostrof";
+    case L'`': return L"akcent odwrotny";
+    case L'~': return L"tylda";
+    default:
+        return std::wstring(1, ch);
+    }
+}
+
+std::wstring SpellOutText(const wchar_t* text, ULONG len) {
+    std::wstring out;
+    for (ULONG i = 0; i < len; ++i) {
+        const std::wstring name = SpellOutNameForChar(text[i]);
+        if (name.empty()) {
+            continue;
+        }
+        if (!out.empty()) {
+            out.push_back(L' ');
+        }
+        out += name;
+    }
+    return out;
+}
+
 void ReplaceAll(std::wstring& s, const std::wstring& from, const std::wstring& to) {
     if (from.empty()) return;
     size_t pos = 0;
     while ((pos = s.find(from, pos)) != std::wstring::npos) { s.replace(pos, from.size(), to); pos += to.size(); }
 }
 
+struct EmojiEntry {
+    std::wstring key;
+    std::wstring spoken;
+};
+
+std::wstring Utf8ToWide(const std::string& text) {
+    if (text.empty()) {
+        return {};
+    }
+    const int size = MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
+    if (size <= 0) {
+        return {};
+    }
+    std::wstring out(static_cast<size_t>(size), L'\0');
+    const int written = MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), out.data(), size);
+    if (written <= 0) {
+        return {};
+    }
+    return out;
+}
+
+std::wstring GetModuleDirectory() {
+    wchar_t path[MAX_PATH] = {0};
+    if (GetModuleFileNameW(g_module, path, static_cast<DWORD>(std::size(path))) == 0) {
+        return {};
+    }
+    std::wstring full(path);
+    const size_t slash = full.find_last_of(L"\\/");
+    return slash == std::wstring::npos ? std::wstring() : full.substr(0, slash);
+}
+
+std::wstring GetEmojiDataPath() {
+    const std::wstring moduleDir = GetModuleDirectory();
+    if (moduleDir.empty()) {
+        return {};
+    }
+    return moduleDir + L"\\" + kEmojiDataFileName;
+}
+
+std::wstring TrimWide(const std::wstring& value) {
+    size_t start = 0;
+    while (start < value.size() && IsWhitespace(value[start])) {
+        ++start;
+    }
+    size_t end = value.size();
+    while (end > start && IsWhitespace(value[end - 1])) {
+        --end;
+    }
+    return value.substr(start, end - start);
+}
+
+const std::unordered_map<wchar_t, std::vector<EmojiEntry>>& GetEmojiIndex() {
+    static std::once_flag once;
+    static std::unordered_map<wchar_t, std::vector<EmojiEntry>> index;
+    std::call_once(once, []() {
+        std::ifstream input(GetEmojiDataPath(), std::ios::binary);
+        if (!input) {
+            index[L'\xD83D'].push_back({L"😀", L"uśmiechnięta buźka"});
+            index[L'\x2764'].push_back({L"❤", L"czerwone serce"});
+            index[L'\xD83D'].push_back({L"👍", L"kciuk w górę"});
+            return;
+        }
+        std::string line;
+        while (std::getline(input, line)) {
+            if (!line.empty() && line.back() == '\r') {
+                line.pop_back();
+            }
+            const size_t tab = line.find('\t');
+            if (tab == std::string::npos || tab == 0 || tab + 1 >= line.size()) {
+                continue;
+            }
+            const std::wstring key = TrimWide(Utf8ToWide(line.substr(0, tab)));
+            const std::wstring spoken = TrimWide(Utf8ToWide(line.substr(tab + 1)));
+            if (key.empty() || spoken.empty()) {
+                continue;
+            }
+            index[key.front()].push_back({key, spoken});
+        }
+        for (auto& pair : index) {
+            auto& entries = pair.second;
+            std::sort(entries.begin(), entries.end(), [](const EmojiEntry& a, const EmojiEntry& b) {
+                return a.key.size() > b.key.size();
+            });
+        }
+    });
+    return index;
+}
+
+size_t MatchEmojiKey(const std::wstring& text, size_t start, const std::wstring& key) {
+    size_t ti = start;
+    size_t ki = 0;
+    while (ki < key.size()) {
+        while (ti < text.size() && text[ti] == L'\xFE0F') {
+            ++ti;
+        }
+        if (ti >= text.size() || text[ti] != key[ki]) {
+            return std::wstring::npos;
+        }
+        ++ti;
+        ++ki;
+    }
+    while (ti < text.size() && text[ti] == L'\xFE0F') {
+        ++ti;
+    }
+    return ti;
+}
+
+std::wstring ReplaceAsciiEmoticons(const std::wstring& text) {
+    std::wstring out = text;
+    static const std::array<std::pair<const wchar_t*, const wchar_t*>, 13> kAscii = {{
+        {L"<3", L" serce "},
+        {L":-)", L" uśmiechnięta buźka "},
+        {L":)", L" uśmiechnięta buźka "},
+        {L":-(", L" smutna buźka "},
+        {L":(", L" smutna buźka "},
+        {L";-)", L" mrugająca buźka "},
+        {L";)", L" mrugająca buźka "},
+        {L":-D", L" roześmiana buźka "},
+        {L":D", L" roześmiana buźka "},
+        {L":-P", L" buźka z językiem "},
+        {L":P", L" buźka z językiem "},
+        {L":-*", L" buziak "},
+        {L":*", L" buziak "},
+    }};
+    for (const auto& pair : kAscii) {
+        ReplaceAll(out, pair.first, pair.second);
+    }
+    return out;
+}
+
+std::wstring CompactSpokenText(const std::wstring& text) {
+    std::wstring out;
+    out.reserve(text.size());
+    bool previousSpace = false;
+    for (wchar_t ch : text) {
+        if (IsWhitespace(ch)) {
+            if (!previousSpace) {
+                out.push_back(L' ');
+                previousSpace = true;
+            }
+            continue;
+        }
+        if ((ch == L',' || ch == L'.' || ch == L';' || ch == L':' || ch == L'!' || ch == L'?') && !out.empty() && out.back() == L' ') {
+            out.pop_back();
+        }
+        out.push_back(ch);
+        previousSpace = false;
+    }
+    return TrimWide(out);
+}
+
+std::wstring NormalizeEmojiText(const std::wstring& text, bool enabled) {
+    if (!enabled || text.empty()) {
+        return text;
+    }
+    const auto& index = GetEmojiIndex();
+    const std::wstring asciiNormalized = ReplaceAsciiEmoticons(text);
+    std::wstring out;
+    out.reserve(asciiNormalized.size() + 32);
+    size_t i = 0;
+    while (i < asciiNormalized.size()) {
+        const auto it = index.find(asciiNormalized[i]);
+        bool matched = false;
+        if (it != index.end()) {
+            for (const auto& entry : it->second) {
+                const size_t end = MatchEmojiKey(asciiNormalized, i, entry.key);
+                if (end == std::wstring::npos) {
+                    continue;
+                }
+                out.push_back(L' ');
+                out += entry.spoken;
+                out.push_back(L' ');
+                i = end;
+                matched = true;
+                break;
+            }
+        }
+        if (matched) {
+            continue;
+        }
+        out.push_back(asciiNormalized[i]);
+        ++i;
+    }
+    return CompactSpokenText(out);
+}
+
 std::wstring JoinSpeakText(const SPVTEXTFRAG* fragList) {
     std::wstring out;
     for (auto f = fragList; f; f = f->pNext) {
         if (f->pTextStart && f->ulTextLen > 0 && IsSpeechAction(f->State.eAction)) {
-            out.append(f->pTextStart, f->ulTextLen);
+            if (f->State.eAction == SPVA_SpellOut) {
+                out += SpellOutText(f->pTextStart, f->ulTextLen);
+            } else {
+                out.append(f->pTextStart, f->ulTextLen);
+            }
             out.push_back(L' ');
         } else if (f->State.eAction == SPVA_Silence) {
             out.push_back(L' ');
@@ -148,6 +444,9 @@ UserVoiceSettings LoadUserVoiceSettings() {
     }
     if (ReadUserDword(L"VolumePercent", &value)) {
         settings.volumePercent = ClampInt(static_cast<int>(value), 0, 100);
+    }
+    if (ReadUserDword(L"SpeakEmoji", &value)) {
+        settings.speakEmoji = value != 0;
     }
     return settings;
 }
@@ -555,6 +854,7 @@ public:
         long rateAdj = 0; (void)pOutputSite->GetRate(&rateAdj);
         USHORT vol = 100; (void)pOutputSite->GetVolume(&vol);
         const UserVoiceSettings userSettings = LoadUserVoiceSettings();
+        text = NormalizeEmojiText(text, userSettings.speakEmoji);
         const long middleAdj = AveragePitchMiddleAdj(pTextFragList);
         const long rangeAdj = AveragePitchRangeAdj(pTextFragList);
         const int emphAdj = EmphasisAdjust(pTextFragList);

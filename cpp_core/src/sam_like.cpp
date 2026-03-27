@@ -355,7 +355,7 @@ std::vector<SamUnit> WordToSamUnits(std::wstring_view word, int stress) {
     static const std::unordered_map<std::wstring, std::vector<SamUnit>> kSpecialWords = {
         {L"w", {{"V", false}}},
         {L"z", {{"Z", false}}},
-        {L"i", {{"IH", true}}},
+        {L"i", {{"IY", true}}},
         {L"a", {{"AA", true}}},
         {L"o", {{"OH", true}}},
         {L"u", {{"UW", true}}},

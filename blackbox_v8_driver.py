@@ -4,6 +4,7 @@ from __future__ import annotations
 import ctypes
 import os
 import queue
+import re
 import struct
 import threading
 from dataclasses import dataclass, field
@@ -17,10 +18,144 @@ import logHandler
 import nvwave
 from speech.commands import BreakCommand, CharacterModeCommand, IndexCommand, PitchCommand, RateCommand, VolumeCommand
 from synthDriverHandler import SynthDriver as BaseSynthDriver, synthDoneSpeaking, synthIndexReached
+try:
+    from autoSettingsUtils.driverSetting import BooleanDriverSetting
+except Exception:  # pragma: no cover - fallback for tests/non-NVDA env
+    class BooleanDriverSetting:
+        def __init__(self, id, displayNameWithAccelerator, availableInSettingsRing=False, displayName=None, defaultVal=False, useConfig=True):
+            self.id = id
+            self.displayNameWithAccelerator = displayNameWithAccelerator
+            self.availableInSettingsRing = availableInSettingsRing
+            self.displayName = displayName or displayNameWithAccelerator.replace("&", "")
+            self.defaultVal = defaultVal
+            self.useConfig = useConfig
 
 
 USER_SETTINGS_KEY = r"Software\BlackBox\SAPI5\Settings"
 DEFAULT_MODULATION = 50
+EMOJI_ASSET_FALLBACK = Path("android") / "app" / "src" / "main" / "assets" / "emoji" / "emoji_pl_cldr.tsv"
+ASCII_EMOTICONS = (
+    ("<3", "serce"),
+    (":-)", "uśmiechnięta buźka"),
+    (":)", "uśmiechnięta buźka"),
+    (":-(", "smutna buźka"),
+    (":(", "smutna buźka"),
+    (";-)", "mrugająca buźka"),
+    (";)", "mrugająca buźka"),
+    (":-D", "roześmiana buźka"),
+    (":D", "roześmiana buźka"),
+    (":-P", "buźka z językiem"),
+    (":P", "buźka z językiem"),
+    (":-*", "buziak"),
+    (":*", "buziak"),
+)
+CHAR_MODE_LABELS = {
+    "a": "a",
+    "ą": "a z ogonkiem",
+    "b": "be",
+    "c": "ce",
+    "ć": "cie z kreską",
+    "d": "de",
+    "e": "e",
+    "ę": "e z ogonkiem",
+    "f": "ef",
+    "g": "gie",
+    "h": "ha",
+    "i": "i",
+    "j": "jot",
+    "k": "ka",
+    "l": "el",
+    "ł": "eł przekreślone",
+    "m": "em",
+    "n": "en",
+    "ń": "eń z kreską",
+    "o": "o",
+    "ó": "u z kreską",
+    "p": "pe",
+    "q": "ku",
+    "r": "er",
+    "s": "es",
+    "ś": "ś z kreską",
+    "t": "te",
+    "u": "u",
+    "v": "fał",
+    "w": "wu",
+    "x": "iks",
+    "y": "igrek",
+    "z": "zet",
+    "ź": "zie z kreską",
+    "ż": "zet z kropką",
+    "0": "zero",
+    "1": "jeden",
+    "2": "dwa",
+    "3": "trzy",
+    "4": "cztery",
+    "5": "pięć",
+    "6": "sześć",
+    "7": "siedem",
+    "8": "osiem",
+    "9": "dziewięć",
+    " ": "spacja",
+    "\t": "tabulator",
+    "\n": "enter",
+    "\r": "enter",
+    ".": "kropka",
+    ",": "przecinek",
+    ":": "dwukropek",
+    ";": "średnik",
+    "!": "wykrzyknik",
+    "?": "znak zapytania",
+    "@": "małpa",
+    "#": "kratka",
+    "$": "dolar",
+    "%": "procent",
+    "^": "daszek",
+    "&": "ampersand",
+    "*": "gwiazdka",
+    "(": "nawias otwierający",
+    ")": "nawias zamykający",
+    "[": "lewy nawias kwadratowy",
+    "]": "prawy nawias kwadratowy",
+    "{": "lewa klamra",
+    "}": "prawa klamra",
+    "<": "mniejsze niż",
+    ">": "większe niż",
+    "/": "ukośnik",
+    "\\": "ukośnik wsteczny",
+    "|": "pionowa kreska",
+    "-": "minus",
+    "_": "podkreślnik",
+    "=": "równa się",
+    "+": "plus",
+    "\"": "cudzysłów",
+    "'": "apostrof",
+    "`": "akcent odwrotny",
+    "~": "tylda",
+}
+FALLBACK_EMOJI_LABELS = {
+    "😀": "uśmiechnięta buźka",
+    "😂": "buźka ze łzami radości",
+    "🤣": "tarza się ze śmiechu",
+    "🙂": "lekko uśmiechnięta buźka",
+    "😉": "mrugająca buźka",
+    "😍": "buźka z sercami w oczach",
+    "😘": "buźka wysyłająca buziaka",
+    "😭": "głośno płacząca buźka",
+    "🤔": "zamyślona buźka",
+    "😎": "buźka w okularach",
+    "👍": "kciuk w górę",
+    "👎": "kciuk w dół",
+    "👏": "klaskanie",
+    "🙏": "złożone dłonie",
+    "❤": "czerwone serce",
+    "💔": "złamane serce",
+    "🔥": "ogień",
+    "✨": "iskry",
+    "🎉": "konfetti",
+    "💩": "kupka",
+}
+_EMOJI_MAP: dict[str, str] | None = None
+_EMOJI_INDEX: dict[str, list[tuple[str, str]]] | None = None
 
 
 def _clamp(value: int, lo: int, hi: int) -> int:
@@ -39,8 +174,107 @@ def _read_user_percent(name: str, default: int) -> int:
 
 
 def _char_mode_text(text: str) -> str:
-    chars = [ch for ch in text if not ch.isspace()]
-    return " ".join(chars)
+    spoken = []
+    for ch in text:
+        spoken.append(CHAR_MODE_LABELS.get(ch.lower(), ch))
+    return " ".join(part for part in spoken if part)
+
+
+def _emoji_asset_candidates() -> list[Path]:
+    here = Path(__file__).resolve().parent
+    return [
+        here / "data" / "emoji" / "emoji_pl_cldr.tsv",
+        Path.cwd() / EMOJI_ASSET_FALLBACK,
+        here.parent / EMOJI_ASSET_FALLBACK,
+    ]
+
+
+def _load_emoji_map() -> tuple[dict[str, str], dict[str, list[tuple[str, str]]]]:
+    global _EMOJI_MAP, _EMOJI_INDEX
+    if _EMOJI_MAP is not None and _EMOJI_INDEX is not None:
+        return _EMOJI_MAP, _EMOJI_INDEX
+
+    emoji_map: dict[str, str] = {}
+    for candidate in _emoji_asset_candidates():
+        if not candidate.exists():
+            continue
+        with candidate.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.rstrip("\n")
+                if "\t" not in line:
+                    continue
+                cp, tts = line.split("\t", 1)
+                cp = cp.strip()
+                tts = tts.strip()
+                if cp and tts:
+                    emoji_map[cp] = tts
+        if emoji_map:
+            break
+    if not emoji_map:
+        emoji_map = dict(FALLBACK_EMOJI_LABELS)
+
+    emoji_index: dict[str, list[tuple[str, str]]] = {}
+    for key, value in emoji_map.items():
+        first = key[0]
+        emoji_index.setdefault(first, []).append((key, value))
+    for first in emoji_index:
+        emoji_index[first].sort(key=lambda item: len(item[0]), reverse=True)
+
+    _EMOJI_MAP = emoji_map
+    _EMOJI_INDEX = emoji_index
+    return emoji_map, emoji_index
+
+
+def _match_emoji_key(text: str, start: int, key: str) -> int | None:
+    ti = start
+    ki = 0
+    while ki < len(key):
+        while ti < len(text) and text[ti] == "\ufe0f":
+            ti += 1
+        if ti >= len(text) or text[ti] != key[ki]:
+            return None
+        ti += 1
+        ki += 1
+    while ti < len(text) and text[ti] == "\ufe0f":
+        ti += 1
+    return ti
+
+
+def _replace_ascii_emoticons(text: str) -> str:
+    out = text
+    for emoticon, spoken in ASCII_EMOTICONS:
+        out = out.replace(emoticon, f" {spoken} ")
+    return out
+
+
+def _normalize_emoji_text(text: str, enabled: bool) -> str:
+    if not enabled or not text:
+        return text
+    _emoji_map, emoji_index = _load_emoji_map()
+    normalized = _replace_ascii_emoticons(text)
+    out: list[str] = []
+    i = 0
+    while i < len(normalized):
+        candidates = emoji_index.get(normalized[i])
+        matched = None
+        if candidates:
+            for key, spoken in candidates:
+                end = _match_emoji_key(normalized, i, key)
+                if end is not None:
+                    matched = (end, spoken)
+                    break
+        if matched is not None:
+            out.append(" ")
+            out.append(matched[1])
+            out.append(" ")
+            i = matched[0]
+            continue
+        out.append(normalized[i])
+        i += 1
+    result = "".join(out)
+    result = re.sub(r" {2,}", " ", result)
+    result = re.sub(r"\s+([,.;:!?])", r"\1", result)
+    return result.strip()
 
 
 def _driver_dir() -> Path:
@@ -127,6 +361,12 @@ class SynthDriver(BaseSynthDriver):
         BaseSynthDriver.RateSetting(),
         BaseSynthDriver.PitchSetting(),
         BaseSynthDriver.VolumeSetting(),
+        BooleanDriverSetting(
+            "speakEmojis",
+            "Odczytuj &emotikony i emoji",
+            availableInSettingsRing=False,
+            defaultVal=True,
+        ),
     )
     supportedCommands = {IndexCommand, CharacterModeCommand, BreakCommand, PitchCommand, RateCommand, VolumeCommand}
     supportedNotifications = {synthIndexReached, synthDoneSpeaking}
@@ -134,6 +374,7 @@ class SynthDriver(BaseSynthDriver):
     _rate = 50
     _pitch = 50
     _volume = 100
+    _speakEmojis = True
 
     @classmethod
     def check(cls):
@@ -190,6 +431,7 @@ class SynthDriver(BaseSynthDriver):
             return
         if character_mode:
             text = _char_mode_text(text)
+        text = _normalize_emoji_text(text, self._speakEmojis)
         chunks.append(
             _Chunk(
                 kind="speech",
@@ -347,3 +589,9 @@ class SynthDriver(BaseSynthDriver):
 
     def _get_language(self):
         return "pl"
+
+    def _get_speakEmojis(self):
+        return self._speakEmojis
+
+    def _set_speakEmojis(self, value):
+        self._speakEmojis = bool(value)

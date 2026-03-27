@@ -203,7 +203,7 @@ class BlackBoxNvdaDriverTests(unittest.TestCase):
         try:
             seq = [
                 _FakeCharacterModeCommand(True),
-                "AB",
+                "ab.@",
                 _FakeCharacterModeCommand(False),
                 _FakeBreakCommand(50),
                 "kot",
@@ -211,9 +211,31 @@ class BlackBoxNvdaDriverTests(unittest.TestCase):
             synth.speak(seq)
             synth._queue.join()
             self.assertEqual(len(synth.player.feeds), 3)
-            self.assertIn(b"A B", synth.player.feeds[0])
+            self.assertIn("a be kropka małpa".encode("utf-8"), synth.player.feeds[0])
             self.assertEqual(len(synth.player.feeds[1]), 2204)
             self.assertIn(b"kot", synth.player.feeds[2])
+        finally:
+            synth.terminate()
+
+    def test_emoji_normalization_can_be_toggled(self):
+        module = _load_driver_module()
+        module._load_emoji_map = lambda: (
+            {"😀": "uśmiechnięta buźka", "👋🏻": "machająca dłoń: karnacja jasna"},
+            {
+                "😀": [("😀", "uśmiechnięta buźka")],
+                "👋": [("👋🏻", "machająca dłoń: karnacja jasna")],
+            },
+        )
+        synth = module.SynthDriver()
+        try:
+            synth.speak(["Hej 😀 👋🏻"])
+            synth._queue.join()
+            self.assertIn("Hej uśmiechnięta buźka machająca dłoń: karnacja jasna".encode("utf-8"), synth.player.feeds[0])
+            synth.cancel()
+            synth._speakEmojis = False
+            synth.speak(["Hej 😀"])
+            synth._queue.join()
+            self.assertIn("Hej 😀".encode("utf-8"), synth.player.feeds[-1])
         finally:
             synth.terminate()
 

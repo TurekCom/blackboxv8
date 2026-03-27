@@ -19,6 +19,7 @@ enum ControlId : int {
     IDC_MOD_VALUE,
     IDC_VOLUME_TRACK,
     IDC_VOLUME_VALUE,
+    IDC_EMOJI_CHECK,
     IDC_SAVE_BUTTON,
     IDC_RESET_BUTTON,
     IDC_CLOSE_BUTTON,
@@ -88,12 +89,14 @@ void LoadAllSettings(HWND hwnd) {
     for (const auto& slider : kSliders) {
         SetSliderValue(hwnd, slider, ReadSettingOrDefault(slider.settingName, slider.defaultValue));
     }
+    CheckDlgButton(hwnd, IDC_EMOJI_CHECK, ReadSettingOrDefault(L"SpeakEmoji", 1) ? BST_CHECKED : BST_UNCHECKED);
 }
 
 void ResetAllSettings(HWND hwnd) {
     for (const auto& slider : kSliders) {
         SetSliderValue(hwnd, slider, slider.defaultValue);
     }
+    CheckDlgButton(hwnd, IDC_EMOJI_CHECK, BST_CHECKED);
 }
 
 void SaveAllSettings(HWND hwnd) {
@@ -101,6 +104,7 @@ void SaveAllSettings(HWND hwnd) {
     for (const auto& slider : kSliders) {
         ok = WriteSetting(slider.settingName, GetSliderValue(hwnd, slider)) && ok;
     }
+    ok = WriteSetting(L"SpeakEmoji", IsDlgButtonChecked(hwnd, IDC_EMOJI_CHECK) == BST_CHECKED ? 1 : 0) && ok;
     MessageBoxW(
         hwnd,
         ok ? L"Zapisano ustawienia. Silnik odczyta je przy następnej wypowiedzi."
@@ -119,6 +123,12 @@ HWND CreateLabel(HWND parent, const wchar_t* text, int x, int y, int w, int h, i
 HWND CreateButton(HWND parent, int id, const wchar_t* text, int x, int y, int w, int h) {
     const DWORD style = (id == IDC_SAVE_BUTTON) ? (WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON) : (WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON);
     HWND hwnd = CreateWindowExW(0, WC_BUTTONW, text, style, x, y, w, h, parent, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), nullptr, nullptr);
+    ApplyUiFont(hwnd);
+    return hwnd;
+}
+
+HWND CreateCheckBox(HWND parent, int id, const wchar_t* text, int x, int y, int w, int h) {
+    HWND hwnd = CreateWindowExW(0, WC_BUTTONW, text, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX, x, y, w, h, parent, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), nullptr, nullptr);
     ApplyUiFont(hwnd);
     return hwnd;
 }
@@ -147,6 +157,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             SendMessageW(track, TBM_SETBUDDY, FALSE, reinterpret_cast<LPARAM>(value));
             y += 52;
         }
+
+        CreateCheckBox(hwnd, IDC_EMOJI_CHECK, L"Odczytuj emotikony i emoji", 130, y + 4, 250, 24);
+        CreateLabel(hwnd, L"Gdy wyłączone, emoji i emotikony będą pomijane jako zwykły tekst.", 130, y + 30, 320, 20);
+        y += 56;
 
         CreateButton(hwnd, IDC_SAVE_BUTTON, L"Zapisz", 130, y + 10, 100, 28);
         CreateButton(hwnd, IDC_RESET_BUTTON, L"Domyślne", 240, y + 10, 100, 28);
@@ -218,7 +232,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand) {
         CW_USEDEFAULT,
         CW_USEDEFAULT,
         490,
-        330,
+        390,
         nullptr,
         nullptr,
         instance,

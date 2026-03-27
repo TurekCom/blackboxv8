@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">BlackBox V8</string>
+    <string name="engine_name">BlackBox V8</string>
+    <string name="settings_title">Ustawienia BlackBox V8</string>
+    <string name="settings_header">BlackBox V8 na Androida</string>
+    <string name="settings_subtitle">Silnik TTS do TalkBacka i innych aplikacji.</string>
+    <string name="rate_label">Prędkość</string>
+    <string name="pitch_label">Wysokość</string>
+    <string name="volume_label">Głośność</string>
+    <string name="modulation_label">Modulacja zdań</string>
+    <string name="speak_emoji_label">Odczytuj emotikony i emoji</string>
+    <string name="speak_emoji_help">Gdy włączone, silnik zamienia popularne emotikony, emoji i pojedyncze znaki specjalne na polskie nazwy.</string>
+    <string name="emoji_enabled">Odczyt emotikon i emoji włączony.</string>
+    <string name="emoji_disabled">Odczyt emotikon i emoji wyłączony.</string>
+    <string name="dictionary_label">Słownik wymowy</string>
+    <string name="dictionary_help">Format pliku: słowo=wymowa, po jednej parze w linii. Przykład: facebook=fejsbuk</string>
+    <string name="dictionary_button">Dodaj słownik TXT</string>
+    <string name="dictionary_none">Brak wgranego słownika.</string>
+    <string name="dictionary_loaded">Wgrany słownik: %1$s</string>
+    <string name="dictionary_error">Nie udało się wczytać słownika.</string>
+    <string name="sample_text">Cześć. Tu BlackBox V8 na Androidzie.</string>
+    <string name="percent_value">%1$d%%</string>
+    <string name="preview_label">Test odsłuchu</string>
+    <string name="preview_hint">Wpisz tekst do sprawdzenia syntezy</string>
+    <string name="preview_button">Odtwórz test</string>
+    <string name="preview_stop_button">Zatrzymaj</string>
+    <string name="preview_ready">Silnik testowy gotowy.</string>
+    <string name="preview_error">Nie udało się uruchomić testowego TTS.</string>
+    <string name="preview_empty">Pole testowe jest puste.</string>
+</resources>

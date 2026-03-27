@@ -1,0 +1,9 @@
+﻿.gradle/
+.kotlin/
+tmp_cldr/
+local.properties
+app/.cxx/
+app/build/
+
+*.jks
+release-signing.properties
